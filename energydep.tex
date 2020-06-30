@@ -5,13 +5,13 @@
 \usepackage{upgreek}
 \usepackage[capitalise,nameinlink]{cleveref}
 
-\newcommand{\efr}{E_\text{fr}}
-\newcommand{\enp}{E_\text{n,p}}
-\newcommand{\ened}{E_\text{n,d}}
-\newcommand{\egp}{E_\text{$\gamma$,p}}
-\newcommand{\egd}{E_\text{$\gamma$,d}}
-\newcommand{\eb}{E_\upbeta}
-\newcommand{\enu}{E_\nu}
+\newcommand{\efr}{Q_\text{fr}}
+\newcommand{\enp}{Q_\text{n,p}}
+\newcommand{\ened}{Q_\text{n,d}}
+\newcommand{\egp}{Q_\text{$\gamma$,p}}
+\newcommand{\egd}{Q_\text{$\gamma$,d}}
+\newcommand{\eb}{Q_\upbeta}
+\newcommand{\enu}{Q_\nu}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \title{Energy Deposition in the OpenMC Monte Carlo Particle Transport Code}
@@ -45,7 +45,7 @@ of energy deposition, otherwise known as the power distribution, in nuclear
 reactors. Multiplying the fission reaction rate by a constant will give a rough
 estimate of the energy deposition. However, it does not account for the
 redistribution of energy due to the transport of neutral secondary particles
-away from a reaction site. In the present work, we describe the methods used to
+away from a collision site. In the present work, we describe the methods used to
 calculate energy deposition in OpenMC, a community-developed open source Monte
 Carlo particle transport code~\cite{romano2015ane1}. With the recent inclusion
 of photon transport in OpenMC~\cite{lund2018anl}, it is now possible to obtain
@@ -73,15 +73,15 @@ calculate KERMA as
     k_r(E) = \left(E + Q_r - \bar{E}_{r, \text{n}}
     - \bar{E}_{r, \gamma}\right)\sigma_{r}(E),
 \end{equation}
-where $Q_r$ is the $Q$ value of reaction $r$, $\bar{E}_{r,n}$ is the average
-energy carried away by secondary neutrons, $\bar{E}_{r,\gamma}$ is the average
-energy carried away by secondary photons, and $\sigma_r(E)$ is the microscopic
-cross section for reaction $r$. Without loss of generality, we have omitted the
-$i$ subscript for simplicity, and it is to be understood that $k_r$ represents
-the KERMA for a specific nuclide. The term in parentheses is known as the
-\emph{heating number} and represents the energy put in to the reaction (the
-incident neutron energy and the $Q$ value) and the energy transported away by
-secondary neutral particles.
+where $Q_r$ is the $Q$ value of reaction $r$, $\bar{E}_{r,\text{n}}$ is the
+average energy carried away by secondary neutrons, $\bar{E}_{r,\gamma}$ is the
+average energy carried away by secondary photons, and $\sigma_r(E)$ is the
+microscopic cross section for reaction $r$. Without loss of generality, we have
+omitted the $i$ subscript, and it is to be understood that $k_r$ represents the
+KERMA for a reaction in a specific nuclide. The term in parentheses in
+\cref{eq:kerma} is known as the \emph{heating number} and represents the energy
+put in to the reaction (the incident neutron energy and the $Q$ value) less the
+energy transported away by neutral secondary particles.
 
 During a fission event, there are potentially many secondary particles, and all
 must be considered. The total energy released in a fission event is typically
@@ -97,22 +97,23 @@ broken up into the following categories:
   \enu  &\equiv \text{energy of neutrinos}
 \end{split}
 \end{equation*}
-These components are defined in MF=1, MT=458 data in an ENDF evaluation. All
-these quantities may depend upon incident neutron energy, but this dependence is
-not shown to make the following demonstrations cleaner. NJOY assumes that the
-$Q$ value for fission is equal to the prompt energy release minus the incident
-neutron energy:
+These components are defined in MF=1, MT=458 data in an ENDF incident neutron
+sublibrary evaluation. All these quantities may depend upon incident neutron
+energy, but this dependence is not shown to make the following presentation
+cleaner. NJOY assumes that the $Q$ value for fission is equal to the prompt
+energy release minus the incident neutron energy:
 \begin{equation}
     \label{eq:njoy-fissq}
     Q_f = \efr + \enp + \egp - E
 \end{equation}
 which results in the following expression for the fission KERMA:
 \begin{equation}
-    k_f(E) = \left[\efr + \enp + \egp - \bar{E}_{f,n} - \bar{E}_{f,\gamma}\right]\sigma_f(E).
+    k_f(E) = \left[\efr + \enp + \egp - \bar{E}_{f,\text{n}} - \bar{E}_{f,\gamma}\right]\sigma_f(E).
 \end{equation}
 If the secondary neutron and photon yields and energies are consistent with the
-components of fission energy release in MT=458, we then have $\enp = \bar{E}_n$
-and $\egp = \bar{E}_p$, which results in a fission KERMA of
+components of fission energy release in MT=458, we then have $\enp =
+\bar{E}_{f,\text{n}}$ and $\egp = \bar{E}_{f,\gamma}$, which results in a
+fission KERMA of
 \begin{equation}
     \label{eq:njoy-kerma}
     k_f(E) = \efr \sigma_f(E).
@@ -135,10 +136,14 @@ discuss how these two problems have been addressed in OpenMC.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Methodology}
 
-In OpenMC, energy deposition arising from neutron interactions is calculated by
-using KERMA coefficients, and energy deposition arising from photon interactions
-is calculated using an analog estimator. We begin by discussing the KERMA
-coefficients used for neutron interactions.
+The method for handling energy deposition in OpenMC follows the approach
+introduced by Griesheimer and Stedry~\cite{griesheimer2013mc}. In this approach,
+energy deposition arising from neutron interactions is calculated by using KERMA
+coefficients. Energy deposition arising from photon interactions is calculated
+using an analog estimator when a coupled neutron--photon transport calculation
+is carried out. In a neutron-only calculation, the energy of secondary photons
+is accounted for through KERMA coefficients. We begin by discussing the
+calculation and use of KERMA coefficients.
 
 \subsection{Neutron Interactions}
 
@@ -192,8 +197,8 @@ energy release of delayed photons and betas. However, in a coupled
 neutron--photon calculation \cref{eq:k} still does not account for delayed
 photon energy release because ENDF incident neutron sublibrary files do not
 include the yield or energy spectrum of delayed photons (since these depend on
-material composition). However, the average energy of delayed photons and betas
-is given in the components of fission energy release in MF=1, MT=458. To account
+the material composition). However, the average energy of delayed photons is
+given in the components of fission energy release in MF=1, MT=458. To account
 for the energy corresponding to the release of delayed photons, it is assumed
 that their energy spectrum is the same as that of prompt
 photons~\cite{tuominen2019ane}. This can be accomplished by scaling the yield of
@@ -245,37 +250,43 @@ a thick-target bremsstrahlung treatment that results in the production of
 secondary photons. This implies that energy due to electron/positron
 interactions is deposited at the site where they were originally created, a
 reasonable assumption given their short range in matter. That being said, we
-note that the method outlined here should work equally well even if electrons
-and positrons were explicitly transported.
+note that the method outlined here should work equally well when electrons and
+positrons are explicitly transported.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Results}
 
 To test the energy deposition treatment in OpenMC, a cross-code comparison
-between OpenMC and Serpent 2 carried out on two single pressurized water reactor
-(PWR) assembly models from the VERA core physics benchmark progression
+between OpenMC and Serpent 2 was carried out using two pressurized water reactor
+(PWR) single assembly models from the VERA core physics benchmark progression
 problems~\cite{godfrey2014casl}, namely models 2b and 2g. These models were
 chosen because results using Serpent 2 and MCNP6 have been reported
 previously~\cite{tuominen2019ane}. For both models, the geometry is a single
 17$\times$17 fuel assembly with 3.1\% enriched UO$_2$ fuel. The problem has
 reflective boundary conditions in the $x$ and $y$ directions and extends to
 positive/negative infinity in the $z$ direction. Model 2b contains 25 empty
-guide tubes; in model 2g, 24 of the guide tubes are replaced with
-silver-indium-cadmium (Ag-In-Cd) control rods, leaving only the central guide
-tube.
+guide tubes; 24 of the guide tubes are replaced with silver-indium-cadmium
+(Ag-In-Cd) control rods in model 2g, leaving only the central guide tube.
 
 A coupled neutron--photon simulation was run for each of the benchmark models.
-The run strategy was to use XX inactive generations, XX active generations, and
-XX particles per generation. For both Serpent 2 and OpenMC, ENDF/B-VIII.0 cross
-sections were used. All Serpent 2 results are taken directly
-from~\cite{tuominen2019ane} rather than being calculated independently.
+The run strategy was to use 50 inactive generations, 100 active generations, and
+1 million particles per generation. ENDF/B-VIII.0 interaction data was used for
+both neutron and photon transport. All Serpent 2 results are taken directly
+from~\cite{tuominen2019ane} rather than being calculated independently. For
+these simulations, the $k_\text{eff}$ weighting factor on non-fission energy
+deposition was not used to match the conditions used for the Serpent 2
+simulations.\!\footnote{Serpent 2 implements a similar correction for
+non-fission energy deposition, but to compare results with MCNP6 the authors
+of~\cite{tuominen2019ane} had turned this feature off.}
+
 \cref{tab:vera2b,tab:vera2g} show the percentage of energy deposited in each of
 the materials in the VERA 2b and 2g models, respectively, as calculated by
 Serpent 2 and OpenMC. We see that the energy deposition calculated by OpenMC
-agrees with Serpent 2 within statistical uncertainty. Furthermore, OpenMC
-calculates an average of 199.XX $\pm$ 0.XX MeV per fission; again, this agrees
-with the value of 199.817 $\pm$ 0.004 MeV per fission reported for Serpent 2
-in~\cite{tuominen2019ane}.
+agrees with Serpent 2 within statistical uncertainty for model 2b. For model 2g,
+there are small differences outside of statistical uncertainty, but generally
+the agreement is quite close. These differences may be caused by differences in
+the physics treatments in the two codes, processing of cross sections, or model
+preparation.
 \begin{table}[htbp]
   \centering
   \caption{Energy deposition in VERA problem 2b.}
@@ -284,9 +295,9 @@ in~\cite{tuominen2019ane}.
     \toprule
     & Serpent 2 (\%) & OpenMC (\%) \\
     \midrule
-    Fuel & 96.8920 $\pm$ 0.0000 & --- \\
-    Cladding & 0.9405 $\pm$ 0.0002 & --- \\
-    Coolant & 2.1675 $\pm$ 0.0002 & --- \\
+    Fuel & 96.8920 $\pm$ 0.0000 & 96.8919 $\pm$ 0.0003 \\
+    Cladding & 0.9405 $\pm$ 0.0002 & 0.9404 $\pm$ 0.0001 \\
+    Coolant & 2.1675 $\pm$ 0.0002 & 2.1678 $\pm$ 0.0003 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -299,13 +310,19 @@ in~\cite{tuominen2019ane}.
     \toprule
     & Serpent 2 (\%) & OpenMC (\%) \\
     \midrule
-    Fuel & 94.079 $\pm$ 0.001 & --- \\
-    Cladding & 1.0083 $\pm$ 0.0002 & --- \\
-    Coolant & 2.6738 $\pm$ 0.0003 & --- \\
-    Poison & 2.0728 $\pm$ 0.0004 & --- \\
+    Fuel & 94.079 $\pm$ 0.001 & 94.0723 $\pm$ 0.0008 \\
+    Cladding & 1.0083 $\pm$ 0.0002 & 1.0101 $\pm$ 0.0002 \\
+    Coolant & 2.6738 $\pm$ 0.0003 & 2.6763 $\pm$ 0.0004 \\
+    Poison & 2.0728 $\pm$ 0.0004 & 2.0752 $\pm$ 0.0004 \\
     \bottomrule
   \end{tabular}
 \end{table}
+
+A second OpenMC simulation of VERA model 2b was carried out with the
+$k_\text{eff}$ weighting factor on non-fission energy deposition applied. In
+this case, OpenMC calculates an average of 199.81 $\pm$ 0.03 MeV per fission,
+which agrees with the value of 199.817 $\pm$ 0.004 MeV per fission reported for
+Serpent 2~\cite{tuominen2019ane}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -319,13 +336,26 @@ directly using pre- and post-collision information. Modifications to photon
 yields at runtime account for delayed photon energy release and prevent an
 imbalance between energy release and deposition in $k$-eigenvalue calculations.
 
-Simulations of two PWR assembly benchmark problems were carried out. Comparison
-of the results obtained using OpenMC compare favorably with previously reported
-results using Serpent 2.
+Simulations of two PWR assembly models from the VERA core physics benchmark
+progression problems were carried out and energy deposition was tallied in each
+material. For the VERA 2b model, the results using OpenMC were within
+statistical uncertainty of previously reported results using Serpent 2. OpenMC
+results on the VERA 2g model show small differences when compared to Serpent 2
+results, but generally the agreement is quite close.
 
-It would be better to use known compositions along with decay sublibrary to
+Energy deposition results obtained with OpenMC are only as good as the
+underlying nuclear data used in a simulation. Because the energy deposited will
+be influenced by integrated neutron cross sections, secondary angle and energy
+distributions, photon production, photon cross sections, and fission energy
+release data, there are many places where bad data can cause problems, as has
+been documented previously in the
+literature~\cite{trumbull2013mc,tuominen2019ane}. Even when the data are
+perfect, there are still improvements to be made; for instance, it would be
+better to use known compositions along with ENDF decay sublibrary files to
 calculate energy deposition from delayed emission of neutrons, photons, and beta
-particles
+particles.
+
+\pagebreak
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Acknowledgments}
