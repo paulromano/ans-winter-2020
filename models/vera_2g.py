@@ -225,7 +225,7 @@ with openmc.StatePoint(sp_path) as sp:
 
 # Get heating in a coupled neutron-photon calculation
 model.settings.photon_transport = True
-model.settings.delayed_photon_scaling = False
+model.settings.delayed_photon_scaling = True
 model.tallies[0].scores = ['fission', 'heating']
 sp_path = model.run()
 with openmc.StatePoint(sp_path) as sp:
@@ -255,7 +255,7 @@ print(heating.to_string())
 percent = unp.uarray(heating['mean'], heating['std. dev.'])
 percent /= percent.sum()
 percent_fuel = percent[:4].sum()
-percent_clad = percent[8:16].sum()
+percent_clad = percent[8:12].sum()
 percent_poison = percent[16:20].sum()
 percent_coolant = percent[20:].sum()
 print(f'Fuel: {percent_fuel*100}')
