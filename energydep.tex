@@ -9,53 +9,68 @@
 \newcommand{\enp}{E_\text{n,p}}
 \newcommand{\ened}{E_\text{n,d}}
 \newcommand{\egp}{E_\text{$\gamma$,p}}
-\newcommand{\egd}{E_\text{$\gamma$,p}}
+\newcommand{\egd}{E_\text{$\gamma$,d}}
 \newcommand{\eb}{E_\upbeta}
 \newcommand{\enu}{E_\nu}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \title{Energy Deposition in the OpenMC Monte Carlo Particle Transport Code}
-\author{Paul K.~Romano,$\!^{*}$ Andrew E. Johnson Amanda L.~Lund,$\!^{*}$ Someone Else,$^{\dagger}$ and Someone Else2,$^{\dagger}$}
+\author{Paul K.~Romano,$\!^{*}$ Andrew E. Johnson,$\!^{\dagger}$ Amanda L.~Lund,$\!^{*}$ and Jingang Liang$^{\ddag}$}
 
 \institute{
 $^{*}$Computational Science Division, Argonne National Laboratory, 9700 S Cass Ave., Lemont, IL 60439, promano@anl.gov
 \and
-$^{\dagger}$MIT, ...
+$^{\dagger}$Georgia Institute of Technology, 770 State St NW, Atlanta, GA 30318, dasindrew@gatech.edu \and
+$^{\ddag}$Institute of Nuclear and New Energy Technology, Tsinghua University, Beijing, China, jingang@tsinghua.edu.cn
 }
 
-% Optional disclaimer: remove this command to hide
-\disclaimer{Notice: this manuscript is a work of fiction. Any resemblance to
-actual articles, living or dead, is purely coincidental.}
+\disclaimer{The submitted manuscript has been created by UChicago Argonne, LLC,
+Operator of Argonne National Laboratory (``Argonne'').  Argonne, a U.S.
+Department of Energy Office of Science laboratory, is operated under Contract
+No. DE-AC02-06CH11357.  The U.S. Government retains for itself, and others
+acting on its behalf, a paid-up nonexclusive, irrevocable worldwide license in
+said article to reproduce, prepare derivative works, distribute copies to the
+public, and perform publicly and display publicly, by or on behalf of the
+Government. The Department of Energy will provide public access to these results
+of federally sponsored research in accordance with the DOE Public Access Plan.
+http://energy.gov/downloads/doe-public-access-plan.}
 
 
 \begin{document}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Introduction}
 
-OpenMC~\cite{romano2015ane1}. Photon transport~\cite{lund2018anl}. Data
-processing capabilities~\cite{romano2017epjwoc}.
+Monte Code particle transport codes are often used to calculate the distribution
+of energy deposition, otherwise known as the power distribution, in nuclear
+reactors. Multiplying the fission reaction rate by a constant will give a rough
+estimate of the energy deposition. However, it does not account for the
+redistribution of energy due to the transport of neutral secondary particles
+away from a reaction site. In the present work, we describe the methods used to
+calculate energy deposition in OpenMC, a community-developed open source Monte
+Carlo particle transport code~\cite{romano2015ane1}. With the recent inclusion
+of photon transport in OpenMC~\cite{lund2018anl}, it is now possible to obtain
+very accurate energy deposition distributions with OpenMC.
 
 As particles traverse a problem, some portion of their energy is deposited at
 collision sites. This energy is deposited when charged particles, including
 electrons and recoil nuclei, undergo electromagnetic interactions with
-surrounding electons and ions. The amount of energy that is deposited for a
-specific reaction is referred to as the ``heating number'' and can be computed
-using a program like NJOY with the HEATR module. The total heating rate can be
-written as,
+surrounding electons and ions. The total heating rate can be written as,
 \begin{equation}
     H(E) = \phi(E)\sum_i \rho_i \sum_r k_{i, r}(E),
 \end{equation}
 where $\phi(E)$ is the scalar flux at energy $E$, $\rho_i$ is the density of
 nuclide $i$, and $k_{i, r}$ is the KERMA (Kinetic Energy Release in Materials)
-coefficient (cite Mack97) for reaction $r$ of isotope $i$. The heating rate,
-$H(E)$, has units of energy per time, typically eV/s. KERMA has units of energy
-$\times$ cross-section (e.g., eV-barn) and can therefore be used much like a
-reaction cross section for the purpose of tallying energy deposition.
+coefficient for reaction $r$ of isotope $i$. The heating rate, $H(E)$, has units
+of energy per time, typically eV/s. KERMA has units of energy $\times$
+cross-section (e.g., eV-barn) and can therefore be used much like a reaction
+cross section for the purpose of tallying energy deposition.
 
 KERMA coefficients can be computed using a nuclear data processing code like
-NJOY, which uses an energy-balance method to calculates KERMA as
+NJOY (specifically the HEATR module), which uses an energy-balance method to
+calculate KERMA as
 \begin{equation}
-    k_r(E) = \left(E + Q_r - \bar{E}_{r, n}
+    \label{eq:kerma}
+    k_r(E) = \left(E + Q_r - \bar{E}_{r, \text{n}}
     - \bar{E}_{r, \gamma}\right)\sigma_{r}(E),
 \end{equation}
 where $Q_r$ is the $Q$ value of reaction $r$, $\bar{E}_{r,n}$ is the average
@@ -88,6 +103,7 @@ not shown to make the following demonstrations cleaner. NJOY assumes that the
 $Q$ value for fission is equal to the prompt energy release minus the incident
 neutron energy:
 \begin{equation}
+    \label{eq:njoy-fissq}
     Q_f = \efr + \enp + \egp - E
 \end{equation}
 which results in the following expression for the fission KERMA:
@@ -103,112 +119,209 @@ and $\egp = \bar{E}_p$, which results in a fission KERMA of
 \end{equation}
 
 There are several problems with the use of \cref{eq:njoy-kerma} to tally energy
-deposition in a Monte Carlo transport simulation. While \cref{eq:njoy-kerma}
-would be appropriate for a coupled neutron-photon calculation wherein the energy
-from photons is deposited separately, if we want to estimate the total heating
-in a neutron-only calculation \cref{eq:njoy-kerma} ignores the energy of
-photons. Additionally, even in a coupled neutron-photon calculation, the yield
-and energy spectrum of delayed photons from fission is generally not known, so
-tallying the energy from photons produced in neutron reactions will
-underestimate the total heating. In this paper, we discuss how these two
-problems have been addressed in OpenMC.
+deposition from fission in a Monte Carlo transport simulation. First and
+foremost, it does not account for the energy deposited by photons and electrons
+that are emitted during the decay of fission products. If it were to possible to
+calculate the heating due to the decay of fission products directly using the
+ENDF decay sublibrary files, such an approach would be preferrable. However,
+this approach is complex and hasn't been widely studied to date. It is common
+practice then to assume that the energy of delayed particles is released
+instantaneously, which is an appropriate assumption for reactors operating at
+steady state. In addition to ignoring the energy of delayed particles, when
+KERMA coefficients based on \cref{eq:kerma} are used in a neutron-only
+calculation, the energy from prompt photons is also ignored. In this paper, we
+discuss how these two problems have been addressed in OpenMC.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Methodology}
 
-For fissile isotopes, OpenMC makes modifications to the heating reaction to
-include all relevant components of fission energy release. These modifications
-are made to the total heating reaction, MT=301. Breaking the total heating
-KERMA into a fission and non-fission section, one can write
-\begin{equation}
-    k_i(E) = k_{i, nf}(E) + \left[E_{fr}(E) + E_{\gamma, p}\right]\sigma_{i, f}(E)
-\end{equation}
-OpenMC seeks to modify the total heating data to include energy from
-$\upbeta$ particles and, conditionally, delayed photons. This conditional
-inclusion depends on the simulation mode: neutron transport, or coupled
-neutron-photon transport. The heating due to fission is removed using MT=318
-data, and then re-built using the desired components of fission energy release
-from MF=1,MT=458 data.
+In OpenMC, energy deposition arising from neutron interactions is calculated by
+using KERMA coefficients, and energy deposition arising from photon interactions
+is calculated using an analog estimator. We begin by discussing the KERMA
+coefficients used for neutron interactions.
 
-For the case of neutron-only transport, OpenMC instructs HEATR to produce
-heating coefficients assuming that energy from photons, $E_{\gamma, p}$ and
-$E_{\gamma, d}$, is deposited at the fission site. Let $N901$ represent the
-total heating number returned from this HEATR run with $N918$ reflecting fission
-heating computed from NJOY. $M901$ represent the following modification
-\begin{equation}
-    M901_{i}(E)\equiv N901_{i}(E) - N918_{i}(E)
-      + \left[E_{i, fr} + E_{i, \beta} + E_{i, \gamma, p}
-      + E_{i, \gamma, d}\right]\sigma_{i, f}(E).
-\end{equation}
-This modified heating data is stored as the MT=901 reaction and will be scored
-if \texttt{heating-local} is included in the tally scores.
+\subsection{Neutron Interactions}
 
-In a coupled neutron-photon transport simulation, OpenMC instructs HEATR to
-assume that energy from photons is not deposited locally. However, the
-definitions provided in the NJOY manual indicate that, regardless of this mode,
-the prompt photon energy is still included in $k_{i, f}$, and therefore must be
-manually removed. Let $N301$ represent the total heating number returned from
-this HEATR run and $M301$ be
-\begin{equation}
-    M301_{i}(E)\equiv N301_{i}(E) - N318_{i}(E)
-      + \left[E_{i, fr}(E) + E_{i, \beta}(E)\right]\sigma_{i, f}(E).
-\end{equation}
-This modified heating data is stored as the MT=301 reaction and will be scored
-if \texttt{heating} is included in the tally scores.
-
-OpenMC uses an HDF5 format for nuclear data that can be converted from ACE files
-produced by NJOY. In the Python API, the \texttt{IncidentNeutron} class holds
-incident neutron data and can be constructed starting with an ACE file by using
-a \texttt{from\_ace} method. A \texttt{from\_njoy} method also exists and can
-create neutron data starting from an ENDF file by running NJOY under the hood.
-This method gives OpenMC more control over options in NJOY.
-
-For energy deposition, the most accurate treatment is to use KERMA values that
-account for the energy deposition from all reactions. There are two
-desired modes of operation:
+As discussed above, the KERMA values calculated by NJOY are not sufficient for
+accurately calculating energy deposition. Thus, the first step is to calculate
+modified KERMA coefficients, which is handled through OpenMC's Python-based data
+processing module~\cite{romano2017epjwoc}. Two sets of KERMA coefficients are
+needed~\cite{trumbull2013mc} for each nuclide corresponding to the two desired
+modes of operation:
 \begin{enumerate}
-    \item In a neutron-only calculation, the KERMA values should be calculated
+    \item In a neutron-only calculation, KERMA coefficients should be calculated
     assuming that photons deposit their energy locally. Without this assumption,
-    some other method would needed to estimate how much energy is deposited from
-    photons.
-    \item In a coupled neutron-photon calculation, the KERMA values should be
+    some other method would be needed to estimate how much energy is deposited
+    from photons.
+    \item In a coupled neutron--photon calculation, KERMA coefficients should be
     calculated assuming photons carry energy away from the reaction site, and
-    photons should be allowed to deposit energy separately.
+    photons should be allowed to deposit energy along their path.
 \end{enumerate}
-When \texttt{IncidentNeutron.from\_njoy} is called, NJOY is run with a sequence
-that includes two HEATR steps, one that assumes photons carry energy away and
-one that assumes they do not. In principle, the KERMA values provided by NJOY
-would be sufficient for calculating energy deposition. However, when fission
-reactions are present, NJOY does not include energy from the delayed emission of
-photons and electrons. This would be desired if it were to possible to calculate
-the heating due to the decay of fission products directly using the ENDF decay
-sublibrary files. However, this approach is complex and hasn't been widely
-studied to date. Thus, normally it is assumed that the delayed energy is release
-instantaneously, which is an appropriate assumption for reactors operating at
-steady state.
+When HDF5 nuclear data files are being generated for OpenMC, NJOY is run with a
+sequence that includes two HEATR steps, one that assumes photons carry energy
+away and one that assumes they do not. OpenMC then stores the following modified
+KERMA in the HDF5 file for the coupled neutron--photon case:
+\begin{equation}
+    \label{eq:k}
+    k(E) = k_\text{NJOY}(E) - k_{f,\text{NJOY}}(E) + \left ( \efr +
+        \eb \right ) \sigma_f(E)
+\end{equation}
+where $k_\text{NJOY}$ and $k_{f,\text{NJOY}}$ are the total (MT=301) and fission
+(MT=318) KERMA coefficients obtained from the NJOY/HEATR calculation with photon
+energy carried away. A modified KERMA for the neutron-only case is calculated as
+\begin{equation}
+    \label{eq:klocal}
+    \begin{split}
+    k_\text{local}(E) = \; &k_\text{local,NJOY}(E) - k_{f,\text{local,NJOY}}(E) \\
+        &+ \left ( \efr + \egp + \egd + \eb \right )  \sigma_f(E)
+    \end{split}
+\end{equation}
+where $k_\text{local,NJOY}$ and $k_{f,\text{local,NJOY}}$ are the total and
+fission KERMA coefficients obtained from the NJOY/HEATR calculation assuming
+photon energy is deposited locally. At runtime, OpenMC can be instructed to use
+$k(E)$ for tallying energy deposition in a coupled neutron--photon calculation
+and $k_\text{local}(E)$ for a neutron-only calculation. The primary benefit of
+performing a coupled neutron--photon calculation is that it accurately captures
+the redistribution of energy from the transport of photons. Additionally, in a
+problem with vacuum boundary conditions, some of the photon energy may leak out
+of the problem, which is not accounted for when using $k_\text{local}(E)$ and a
+neutron-only calculation.
 
-Rather than using the NJOY provided KERMA values directly from MT=301, OpenMC
-first makes modifications to them to account for delayed energy release in
-fission. OpenMC will calculate
+In a neutron-only calculation, using \cref{eq:klocal} will account for the
+energy release of delayed photons and betas. However, in a coupled
+neutron--photon calculation \cref{eq:k} still does not account for delayed
+photon energy release because ENDF incident neutron sublibrary files do not
+include the yield or energy spectrum of delayed photons (since these depend on
+material composition). However, the average energy of delayed photons and betas
+is given in the components of fission energy release in MF=1, MT=458. To account
+for the energy corresponding to the release of delayed photons, it is assumed
+that their energy spectrum is the same as that of prompt
+photons~\cite{tuominen2019ane}. This can be accomplished by scaling the yield of
+prompt photons from fission,
+\begin{equation}
+    y'(E) = \frac{\egp + \egd}{\egp} y(E)
+\end{equation}
+where $y(E)$ is the normal prompt photon yield at energy $E$ and $y'(E)$ is a
+scaled yield that accounts for the energy release of delayed photons.
 
-Processing of data through openmc.data and NJOY. MT=301 heating data and MT=901
-heating-local.
+In a $k$-eigenvalue calculation, there is an imbalance between energy release
+and deposition related to the biasing of the fission source by $1/k_\text{eff}$
+that has been discussed at length by Griesheimer et
+al.~\cite{griesheimer2020physor}. To address this imbalance, non-fission energy
+deposition needs to be weighted by a normalization factor. Although not
+rigorously correct, using $k_\text{eff}$ as the normalization factor provides an
+approximate correction to the energy balance. When energy deposition is being
+tallied in OpenMC during a $k$-eigenvalue calculation, the non-fission portion
+of KERMA is weighted by the most recent estimate of $k_\text{eff}$:
+\begin{equation}
+    \tilde{k}(E) = \left ( k(E) - k_f(E) \right) k_\text{eff} + k_f(E)
+\end{equation}
+where $k_f(E)$ is calculated as $\left ( \efr + \eb \right ) \sigma_f(E)$ for a
+coupled neutron--photon calculation or $\left ( \efr + \egp + \egd + \eb \right)
+\sigma_f(E)$ in a neutron-only calculation. Additionally, photons born from
+non-fission reactions are given a particle weight that is a factor of
+$k_\text{eff}$ higher than normal.
 
-Accounting for delayed photons through scaling photon production~\cite{trumbull2013mc}
 
-Inconsistency with MF=458 data and photon production in ENDF/B-VII.1 (is this
-mentioned in Serpent paper?)
+\subsection{Photon and Electron Interactions}
 
-Approach for tallying. Analog heating tally for photons, electrons, positrons
-(discuss that KERMA was originally attempted, but TTB is a problem). KERMA-based
-heating tally for neutrons
+Determining energy deposition from photon and electron reactions is simpler than
+neutrons because the dominant physical processes do not result in nuclear
+transmutation. In principle, KERMA coefficients for photon interactions can be
+calculated in the same manner as KERMA coefficients for neutron interactions.
+However, this becomes difficult once one considers the tightly-coupled nature of
+photon--electron transport. Instead, the approach in OpenMC is to use the pre-
+and post-collision energies to estimate the energy deposited. Namely, at each
+collision, the energy deposited is calculated as
+\begin{equation}
+    w \left ( E - E' - \sum_i \mathcal{E}_i \right ),
+\end{equation}
+where $w$ is the weight of the particle, $E$ is the pre-collision energy, $E'$
+is the post-collision energy (or zero if the particle does not survive the
+collision), and $\mathcal{E}_i$ is the energy of the $i$th secondary particle.
+This score applies whether the particle in question is a photon, electron, or
+positron. Although OpenMC does not transport electrons or positrons, it does use
+a thick-target bremsstrahlung treatment that results in the production of
+secondary photons. This implies that energy due to electron/positron
+interactions is deposited at the site where they were originally created, a
+reasonable assumption given their short range in matter. That being said, we
+note that the method outlined here should work equally well even if electrons
+and positrons were explicitly transported.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Results}
 
+To test the energy deposition treatment in OpenMC, a cross-code comparison
+between OpenMC and Serpent 2 carried out on two single pressurized water reactor
+(PWR) assembly models from the VERA core physics benchmark progression
+problems~\cite{godfrey2014casl}, namely models 2b and 2g. These models were
+chosen because results using Serpent 2 and MCNP6 have been reported
+previously~\cite{tuominen2019ane}. For both models, the geometry is a single
+17$\times$17 fuel assembly with 3.1\% enriched UO$_2$ fuel. The problem has
+reflective boundary conditions in the $x$ and $y$ directions and extends to
+positive/negative infinity in the $z$ direction. Model 2b contains 25 empty
+guide tubes; in model 2g, 24 of the guide tubes are replaced with
+silver-indium-cadmium (Ag-In-Cd) control rods, leaving only the central guide
+tube.
+
+A coupled neutron--photon simulation was run for each of the benchmark models.
+The run strategy was to use XX inactive generations, XX active generations, and
+XX particles per generation. For both Serpent 2 and OpenMC, ENDF/B-VIII.0 cross
+sections were used. All Serpent 2 results are taken directly
+from~\cite{tuominen2019ane} rather than being calculated independently.
+\cref{tab:vera2b,tab:vera2g} show the percentage of energy deposited in each of
+the materials in the VERA 2b and 2g models, respectively, as calculated by
+Serpent 2 and OpenMC. We see that the energy deposition calculated by OpenMC
+agrees with Serpent 2 within statistical uncertainty. Furthermore, OpenMC
+calculates an average of 199.XX $\pm$ 0.XX MeV per fission; again, this agrees
+with the value of 199.817 $\pm$ 0.004 MeV per fission reported for Serpent 2
+in~\cite{tuominen2019ane}.
+\begin{table}[htbp]
+  \centering
+  \caption{Energy deposition in VERA problem 2b.}
+  \label{tab:vera2b}
+  \begin{tabular}{lcc}
+    \toprule
+    & Serpent 2 (\%) & OpenMC (\%) \\
+    \midrule
+    Fuel & 96.8920 $\pm$ 0.0000 & --- \\
+    Cladding & 0.9405 $\pm$ 0.0002 & --- \\
+    Coolant & 2.1675 $\pm$ 0.0002 & --- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Energy deposition in VERA problem 2g.}
+  \label{tab:vera2g}
+  \begin{tabular}{lcc}
+    \toprule
+    & Serpent 2 (\%) & OpenMC (\%) \\
+    \midrule
+    Fuel & 94.079 $\pm$ 0.001 & --- \\
+    Cladding & 1.0083 $\pm$ 0.0002 & --- \\
+    Coolant & 2.6738 $\pm$ 0.0003 & --- \\
+    Poison & 2.0728 $\pm$ 0.0004 & --- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Conclusions}
+
+A new capability to accurately calculate energy deposition has been implemented
+in OpenMC. The methodology relies on calculating two sets of KERMA coefficients,
+one for coupled neutron--photon transport simulations and one for neutron-only
+simulations. Energy deposited in photon and electron interactions is calculated
+directly using pre- and post-collision information. Modifications to photon
+yields at runtime account for delayed photon energy release and prevent an
+imbalance between energy release and deposition in $k$-eigenvalue calculations.
+
+Simulations of two PWR assembly benchmark problems were carried out. Comparison
+of the results obtained using OpenMC compare favorably with previously reported
+results using Serpent 2.
 
 It would be better to use known compositions along with decay sublibrary to
 calculate energy deposition from delayed emission of neutrons, photons, and beta
@@ -216,6 +329,12 @@ particles
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Acknowledgments}
+
+This research was supported by the Exascale Computing Project (17-SC-20-SC), a
+collaborative effort of the U.S. Department of Energy Office of Science and the
+National Nuclear Security Administration. The submitted manuscript has been
+created by UChicago Argonne, LLC, operator of Argonne National Laboratory under
+contract DE-AC02-06CH11357.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \bibliographystyle{ans}
