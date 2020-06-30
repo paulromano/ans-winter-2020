@@ -1,5 +1,6 @@
 import openmc
 import numpy as np
+from uncertainties import unumpy as unp
 
 model = openmc.model.Model()
 
@@ -186,9 +187,10 @@ with openmc.StatePoint(sp_path) as sp:
 
 def mev_per_fission(df, score):
     heating = df[df.score == score]
-    total_heating = heating['mean'].sum()
-    fission = df[df.score == 'fission']['mean'].sum()
-    return total_heating / fission * 1e-6
+    total_heating = unp.uarray(heating['mean'], heating['std. dev.']).sum()
+    fission = df[df.score == 'fission']
+    total_fission = unp.uarray(fission['mean'], fission['std. dev.']).sum()
+    return total_heating / total_fission * 1e-6
 
 print('Neutron only')
 Ed = mev_per_fission(df_neutron, 'heating-local')
@@ -201,7 +203,13 @@ Ed = mev_per_fission(df_neutron_photon, 'heating')
 print(f'{Ed:.2f} MeV/fission')
 
 heating = df_neutron_photon[df_neutron_photon.score == 'heating'].copy()
-heating['percent'] = heating['mean'] / heating['mean'].sum()
 print(heating.to_string())
-print(heating.groupby('material').sum())
-print(heating.groupby('particle').sum())
+
+percent = unp.uarray(heating['mean'], heating['std. dev.'])
+percent /= percent.sum()
+percent_fuel = percent[:4].sum()
+percent_clad = percent[8:12].sum()
+percent_coolant = percent[12:].sum()
+print(f'Fuel: {percent_fuel*100}')
+print(f'Clad: {percent_clad*100}')
+print(f'Coolant: {percent_coolant*100}')
