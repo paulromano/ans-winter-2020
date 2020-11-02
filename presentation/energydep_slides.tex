@@ -1,0 +1,357 @@
+\documentclass[10pt,noamssymb,svgnames]{beamer}
+\usetheme{metropolis}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{ragged2e}
+\usepackage{upgreek}
+\usepackage{algorithm}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+\usepackage[absolute,overlay]{textpos}
+\usepackage{tikz}
+\usetikzlibrary{arrows,positioning,calc,decorations.pathmorphing}
+
+\tikzset{onslide/.code args={<#1>#2}{%
+  \only<#1>{\pgfkeysalso{#2}} % \pgfkeysalso doesn't change the path
+}}
+\tikzset{temporal/.code args={<#1>#2#3#4}{%
+  \temporal<#1>{\pgfkeysalso{#2}}{\pgfkeysalso{#3}}{\pgfkeysalso{#4}} % \pgfkeysalso doesn't change the path
+}}
+
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,urlcolor=cyan,linkcolor=}
+
+% Python colors
+\definecolor{CyanBlueAzure}{HTML}{4B8BBE} % light blue
+\definecolor{LapisLazuli}{HTML}{306998} % dark blue
+\colorlet{cba}{CyanBlueAzure}
+\colorlet{cn}{CyanBlueAzure!70!white}
+
+\newcommand{\good}[1]{{\color{ForestGreen}{#1}}}
+\newcommand{\bad}[1]{{\color{red}{#1}}}
+
+\newcommand{\efr}{Q_\text{fr}}
+\newcommand{\enp}{Q_\text{n,p}}
+\newcommand{\ened}{Q_\text{n,d}}
+\newcommand{\egp}{Q_\text{$\gamma$,p}}
+\newcommand{\egd}{Q_\text{$\gamma$,d}}
+\newcommand{\eb}{Q_\upbeta}
+\newcommand{\enu}{Q_\nu}
+
+% BEAMER CONFIGURATION ---------------------------------------------------------
+\newcommand<>{\blue}[1]{{\color#2{blue}#1}}
+\newcommand<>{\green}[1]{{\color#2{ForestGreen}#1}}
+\setbeamerfont{block title}{size=\normalsize}
+\setbeamerfont{block body}{size=\scriptsize}
+\setbeamertemplate{mini frames}{}
+
+%\setbeamercolor{sectiontitle}{fg=black}
+\setbeamercolor{part title}{fg=black}
+\setbeamercolor{progress bar}{fg=CyanBlueAzure}
+\setbeamercolor{progress bar in head/foot}{fg=LapisLazuli,bg=CyanBlueAzure}
+\setbeamercolor{progress bar in section page}{fg=LapisLazuli,bg=CyanBlueAzure}
+\setbeamercolor{frametitle}{bg=black!75!white}
+
+% Configure progress bars
+\metroset{progressbar=frametitle}
+\makeatletter
+\setlength{\metropolis@progressonsectionpage@linewidth}{1pt}
+\setlength{\metropolis@progressinheadfoot@linewidth}{2pt}
+\makeatother
+
+% Blank footnote
+\newcommand\blfootnote[1]{%
+  \begingroup
+  \renewcommand\thefootnote{}\footnote{#1}%
+  \addtocounter{footnote}{-1}%
+  \endgroup
+}
+
+\bibliographystyle{ans}
+\setbeamertemplate{bibliography item}{\insertbiblabel}
+
+\newcommand{\vect}[1]{\mathbf{#1}} % vectors and matrices
+
+%%---------------------------------------------------------------------------%%
+\title{Energy Deposition in the OpenMC Monte Carlo Particle Transport Code}
+
+\author{Paul Romano,\!$^1$ Andrew Johnson,\!$^2$ Amanda Lund,\!$^1$ and Jingang Liang$^3$}
+\institute{$^1$Argonne National Laboratory \\ $^2$Georgia Institute of Technology \\ $^3$Tsinghua University}
+\date{November 19, 2020}
+\titlegraphic{%
+  \begin{picture}(0,0)
+    \put(325,-200){\makebox(0,0)[rt]{\includegraphics[height=1.5cm]{ecp_logo_color.eps}}}
+  \end{picture}}
+
+%%---------------------------------------------------------------------------%%
+\begin{document}
+
+\maketitle
+
+%%---------------------------------------------------------------------------%%
+%\section*{Outline}
+
+% TOC, optional
+%\begin{frame}{Outline}
+%  \tableofcontents
+%\end{frame}
+
+\section{Background}
+
+%%---------------------------------------------------------------------------%%
+\begin{frame}{Energy Deposition}
+  \begin{itemize}
+    \item Neutron/photon transport codes are often used to obtain distribution
+    of energy deposition \vfill
+    \item Very simple first-order estimates are possible (e.g., multiply fission
+    reaction rate by constant value) but ignore effects of energy
+    redistribution from neutral secondary particles \vfill
+    \item \emph{This paper describes recently implemented methods in OpenMC for
+    accurately calculating energy deposition in coupled neutron--photon
+    simulations}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Heating rate}
+  \begin{itemize}
+    \item Energy deposition is calculated by tallying a \emph{heating rate}
+    \begin{equation*}
+      H(E) = \blue<2>{\phi(E)}\sum_i \blue<3>{\rho_i} \sum_r \blue<4>{k_{i, r}(E)}
+    \end{equation*}
+    \only<2>{where $\phi(E)$ is the flux}%
+    \only<3>{where $\rho_i$ is the density of nuclide $i$}%
+    \only<4>{where $k_{i,r}(E)$ is the \emph{kerma} coefficient for reaction $r$}
+    \item NJOY calculates kerma coefficients using an energy balance method:
+    \begin{equation*}
+      k_r(E) = \left(E + Q_r - \bar{E}_{r, \text{n}}
+      - \bar{E}_{r, \gamma}\right)\sigma_{r}(E)
+    \end{equation*}
+    \item In principle, we're done; NJOY/HEATR already gives us kerma
+    coefficients and we can use them when scoring tallies
+    \item However, story is a little more complicated for fission
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{How NJOY calculates fission kerma}
+  \only<1-4>{
+  \begin{equation*}
+    k_f(E) = \left(\blue<4>{E +} \blue{Q_f} - \bar{E}_{f, \text{n}}
+    - \bar{E}_{f, \gamma}\right)\sigma_{f}(E)
+  \end{equation*}
+  }
+  \only<2>{
+    \begin{equation*}
+      \begin{split}
+        \efr  &\equiv \text{energy of fission fragments} \\
+        \enp  &\equiv \text{energy of prompt fission neutrons} \\
+        \ened &\equiv \text{energy of delayed fission neutrons} \\
+        \egp  &\equiv \text{energy of prompt fission photons} \\
+        \egd  &\equiv \text{energy of delayed fission photons} \\
+        \eb   &\equiv \text{energy of released $\upbeta$ particles} \\
+        \enu  &\equiv \text{energy of neutrinos}
+      \end{split}
+      \end{equation*}
+  }
+  \only<3-4>{
+    \begin{equation*}
+      \blue{\only<4>{E + }Q_f} = \efr + \enp + \egp\only<3>{ - E}
+    \end{equation*}
+  }
+  \only<5-6>{
+    \begin{equation*}
+      k_f(E) = \left(\efr + \blue<6>{\enp} + \green<6>{\egp} - \blue<6>{\bar{E}_{f,\text{n}}}
+       - \green<6>{\bar{E}_{f,\gamma}}\right)\sigma_f(E)
+    \end{equation*}
+  }
+  \only<7>{
+    \begin{equation*}
+      k_f(E) = \efr \sigma_f(E)
+    \end{equation*}
+  }
+\end{frame}
+
+\begin{frame}{Issues with kerma}
+  \begin{itemize}
+    \item Two problems with NJOY-calculated kermas
+    \begin{enumerate}
+      \item In a neutron-only calculation, we would still be assuming that photons
+      carry away energy
+      \item NJOY-calculated kerma coefficients do not account for delayed energy
+      release from fission (neutrons, photons, betas)
+    \end{enumerate} \vfill
+    \item \emph{How does OpenMC handle this?}
+  \end{itemize}
+\end{frame}
+
+\section{Methodology}
+
+\begin{frame}{OpenMC Approach}
+  \begin{itemize}
+    \item The approach used in OpenMC follows closely that introduced by
+    Griesheimer and Stedry~\cite{griesheimer2013mc}
+    \item Similar approach used in Serpent 2~\cite{tuominen2019ane}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Kermas}
+  Different values are needed depending on whether we are simulating only
+  neutrons or both neutrons and photons:
+  \begin{itemize}
+    \item In a neutron-only calculation, assume photons deposit energy locally
+    \item In a coupled neutron--photon calculation, assume photons carry energy
+    away, and transport of photons should deposit energy
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Neutron-only calculation}
+  \begin{itemize}
+    \item Run NJOY/HEATR with a flag indicating photon energy is deposited locally
+    \item Only fission kerma needs to be modified; other reactions we take kerma
+    directly as calculated from NJOY
+    \begin{equation*}
+      \begin{split}
+      k_{f,\text{local}}(E) = \; &k_\text{local,NJOY}(E) - k_{f,\text{local,NJOY}}(E) \\
+      &+ \left ( \efr + \egp + \egd + \eb \right ) \sigma_f(E)
+      \end{split}
+    \end{equation*}
+    \item Preprocessing handled by \texttt{openmc.data} Python module
+    \item Stored as a special reaction (MT=901) in OpenMC data libraries
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Coupled neutron--photon calculation}
+  \begin{itemize}
+    \item In this case, photon energy is carried away; we just need to account
+    for delayed beta energy in fission kerma
+    \begin{equation*}
+      k_f(E) = k_\text{NJOY}(E) - k_{f,\text{NJOY}}(E) + \left ( \efr +
+        \eb \right ) \sigma_f(E)
+    \end{equation*}
+    \item Store this as total heating (MT=301) in data library \vfill
+    \item Two issues remain:
+    \begin{enumerate}
+      \item Photon production data only includes \emph{prompt} photons
+      \item Equation above only gives us neutron heating; still need to account
+      for photon heating itself
+    \end{enumerate}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Delayed photon energy}
+  \begin{itemize}
+    \item ENDF files don't include fission delayed photon yield/spectrum
+    \item To ensure delayed photon energy is accounted for, we scale the yield
+    of photons
+    \begin{equation*}
+      y'(E) = \frac{\egp + \egd}{\egp} y(E),
+    \end{equation*}
+    \item Preserves total energy, but spectrum of delayed photons is not
+    technically correct
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Photon heating}
+  \begin{itemize}
+    \item In principle, can calculate photon kermas just as we do for neutrons
+    \item However, tight coupling of photon--electron transport makes this
+    difficult (atomic relaxation, thick-target bremsstrahlung)
+    \item However, quite easy to calculate energy deposited on a per-collision
+    (analog) basis:
+    \begin{equation*}
+      w \left ( E - E' - \sum_i \mathcal{E}_i \right )
+    \end{equation*}
+    where $w$ is weight of photon and $\mathcal{E}_i$ is energy of secondaries
+    \item Can attribute energy deposition to photons, electrons, and positrons
+    separately
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Release/deposition imbalance}
+  \begin{itemize}
+    \item In a $k$-eigenvalue calculation, an imbalance exists between energy
+    release and deposition because of biasing of fission source by
+    $1/k_\text{eff}$
+    \item Discussed at length by Griesheimer et al.~\cite{griesheimer2020physor}
+    \item Nonfission portion of kerma is weighted by estimate of $k_\text{eff}$
+    \begin{equation*}
+      \tilde{k}(E) = \left ( k(E) - k_f(E) \right) k_\text{eff} + k_f(E),
+    \end{equation*}
+    \item Photons born from nonfission reactions are given a weight
+    $k_\text{eff}$ higher than normal
+  \end{itemize}
+\end{frame}
+
+\section{Results}
+
+\begin{frame}{Test problems}
+  \begin{itemize}
+    \item Energy deposition comparisons made between OpenMC and Serpent
+    \item VERA core physics problems, models 2b and 2g (17$\times$17 fuel
+    assemblies)
+    \item Coupled neutron--photon simulations carried out using ENDF/B-VIII.0
+    interaction data
+    \item Serpent results are taken directly from~\cite{tuominen2019ane}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{VERA problem 2b results}
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    & Serpent 2 (\%) & OpenMC (\%) \\
+    \midrule
+    Fuel & 96.8920 $\pm$ 0.0000 & 96.8919 $\pm$ 0.0003 \\
+    Cladding & 0.9405 $\pm$ 0.0002 & 0.9404 $\pm$ 0.0001 \\
+    Coolant & 2.1675 $\pm$ 0.0002 & 2.1678 $\pm$ 0.0003 \\
+    \bottomrule
+  \end{tabular}
+\end{frame}
+
+\begin{frame}{VERA problem 2g results}
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    & Serpent 2 (\%) & OpenMC (\%) \\
+    \midrule
+    Fuel & 94.079 $\pm$ 0.001 & 94.0723 $\pm$ 0.0008 \\
+    Cladding & 1.0083 $\pm$ 0.0002 & 1.0101 $\pm$ 0.0002 \\
+    Coolant & 2.6738 $\pm$ 0.0003 & 2.6763 $\pm$ 0.0004 \\
+    Poison & 2.0728 $\pm$ 0.0004 & 2.0752 $\pm$ 0.0004 \\
+    \bottomrule
+  \end{tabular}
+\end{frame}
+
+\begin{frame}{Conclusions}
+  \begin{itemize}
+    \item Methods have been implemented in OpenMC for calculating energy
+    deposition in coupled neutron--photon simulations
+    \item Two sets of kermas are generated, one for neutron-only cases and the
+    other for coupled neutron--photon calculations
+    \item Deposition from neutron collisions relies on kermas, deposition for
+    photon collisions is handled directly for each collision
+    \item Results on two test problems match results from Serpent 2
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Acknowledgments}
+  Special thanks to:
+  \begin{itemize}
+    \item ECP for funding\footnote{This research was supported by the Exascale Computing Project
+    (17-SC-20-SC), a collaborative effort of two U.S. Department of Energy
+    organizations (Office of Science and the National Nuclear Security
+    Administration) responsible for the planning and preparation of a capable
+    exascale ecosystem, including software, applications, hardware, advanced
+    system engineering, and early testbed platforms, in support of the nation’s
+    exascale computing imperative.}
+    \item My co-authors for their contributions
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{References}
+  \scriptsize
+  \bibliography{references}
+\end{frame}
+
+\end{document}

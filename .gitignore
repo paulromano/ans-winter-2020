@@ -9,3 +9,10 @@
 *.out
 *.spl
 *.pdf
+*.nav
+*.snm
+*.toc
+*.xdv
+*.pkl
+*.h5
+*.xml
